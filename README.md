@@ -23,7 +23,7 @@ Client config file and qrcode are generated.
 ### config
 The wireguard default config directory is /etc/wireguard.
 The script config file is wg.def, create and edit it according to wg.def.sample.
-You can generate the public key and private key with command `wg genkey | tee > prikey | wg pubkey > pubkey`.
+You can generate the public key and private key with command `wg genkey | tee > server_private.key | wg pubkey > server_public.key`.
 
 ### usage
 
@@ -32,7 +32,7 @@ Running as root.
 #### start wireguard
 
 ```bash
-wg-quick up wg0
+touch /etc/wireguard/wg0.conf && wg-quick up wg0
 ```
 
 #### add a user
