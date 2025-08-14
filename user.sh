@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 cd `dirname ${BASH_SOURCE[0]}`
+umask 077
 
 . wg.def
 CLIENT_TPL_FILE=client.conf.tpl
@@ -41,7 +42,7 @@ generate_cidr_ip_file_if() {
     local i=$((beg+2))
     while [[ $i -lt $end ]]; do
         ip=$(dec2ip $i)
-	echo "$ip/$mask" >> $AVAILABLE_IP_FILE
+        echo "$ip/$mask" >> $AVAILABLE_IP_FILE
         i=$((i+1))
     done
 }
@@ -49,7 +50,7 @@ generate_cidr_ip_file_if() {
 get_vpn_ip() {
     local ip=$(head -1 $AVAILABLE_IP_FILE)
     if [[ $ip ]]; then
-	local mat="${ip/\//\\\/}"
+        local mat="${ip/\//\\\/}"
         sed -i "/^$mat$/d" $AVAILABLE_IP_FILE
     fi
     echo "$ip"
@@ -66,36 +67,39 @@ add_user() {
 
      mkdir -p "$userdir"
      wg genkey | tee $userdir/privatekey | wg pubkey > $userdir/publickey
+     wg genpsk > $userdir/presharedkey
 
      # client config file
      _PRIVATE_KEY=`cat $userdir/privatekey`
+     _PRESHARED_KEY=`cat $userdir/presharedkey`
      _VPN_IP=$(get_vpn_ip)
      if [[ -z $_VPN_IP ]]; then
          echo "no available ip"
          exit 1
      fi
      eval "echo \"$(cat "${template_file}")\"" > $userdir/client.conf
-     
+
      eval "echo \"$(cat "${template_file}")\"" > $userdir/client.all.conf
      sed -r "s/AllowedIPs.*/AllowedIPs = 0.0.0.0\/0/g" -i $userdir/client.all.conf
-     
+
      qrencode -t ansiutf8  < $userdir/client.conf
      qrencode -o $userdir/$user.png  < $userdir/client.conf
 
      qrencode -o $userdir/$user.all.png  < $userdir/client.all.conf
-     
+
      # change wg config
      local ip=${_VPN_IP%/*}/32
      local public_key=`cat $userdir/publickey`
-     wg set $interface peer $public_key allowed-ips $ip
+     local preshared_key=`cat $userdir/presharedkey`
+     wg set $interface peer $public_key preshared-key ./$userdir/presharedkey allowed-ips $ip
      if [[ $? -ne 0 ]]; then
        echo "wg set failed"
        rm -rf $user
        exit 1
      fi
 
-     echo "$user $_VPN_IP $public_key" >> ${SAVED_FILE}
-    
+     echo "$user $_VPN_IP $public_key $preshared_key" >> ${SAVED_FILE}
+
     else
      echo "$user already exists." 1>&2
      echo
@@ -129,7 +133,7 @@ del_user() {
         echo "$ip" >> ${AVAILABLE_IP_FILE}
     fi
     rm -rf $userdir
-    
+
     sort ${AVAILABLE_IP_FILE} --version-sort -o ${AVAILABLE_IP_FILE}
 }
 
@@ -139,11 +143,12 @@ generate_and_install_server_config_file() {
 
     # server config file
     eval "echo \"$(cat "${template_file}")\"" > $WG_TMP_CONF_FILE
-    while read user vpn_ip public_key; do
+    while read user vpn_ip public_key preshared_key; do
       ip=${vpn_ip%/*}/32
       cat >> $WG_TMP_CONF_FILE <<EOF
 [Peer]
 PublicKey = $public_key
+PresharedKey = $preshared_key
 AllowedIPs = $ip
 EOF
     done < ${SAVED_FILE}
@@ -227,7 +232,7 @@ if [[ $action == "-c" ]]; then
         echo "Exiting."
     fi
 elif [[ $action == "-v" ]]; then
-    view_user $user   
+    view_user $user
 elif [[ $action == "-g" ]]; then
     generate_cidr_ip_file_if
 elif [[ ! -z "$user" && ( $action == "-a" || $action == "-d" ) ]]; then
